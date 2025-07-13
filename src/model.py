@@ -22,8 +22,6 @@ class ResidualModelConfig:
     """Configuration for Residual Policy"""
     channel_dim: int = 256
     channel_hidden_dim: int = 512
-    action_chunk_size: int = 8
-    num_flow_steps: int = 5
 
 
 def posemb_sincos(pos: jax.Array, embedding_dim: int, min_period: float, max_period: float) -> jax.Array:
@@ -301,14 +299,14 @@ class ResidualPolicy(nnx.Module):
     ):
         self.action_dim = action_dim
         self.channel_hidden_dim = config.channel_hidden_dim
-        self.action_chunk_size = config.action_chunk_size
         self.obs_dim = obs_dim
-        self.num_flow_steps = config.num_flow_steps
         
         self.residual_policy = nnx.Sequential(
             nnx.Linear(obs_dim + action_dim, config.channel_dim, rngs=rngs),
             nnx.relu,
             nnx.Linear(config.channel_dim, config.channel_hidden_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_hidden_dim, config.channel_hidden_dim, rngs=rngs),
             nnx.relu,
             nnx.Linear(config.channel_hidden_dim, action_dim, rngs=rngs),
         )

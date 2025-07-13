@@ -86,9 +86,8 @@ def load_base_policy(policy_path: str, obs_dim: int, action_dim: int, config: _m
     nnx.update(policy, policy_state)
     
     # Freeze base policy
-    for param in jax.tree.leaves(nnx.state(policy, nnx.Param)):
-        param = jax.lax.stop_gradient(param)
-    
+    frozen_params = jax.tree_map(jax.lax.stop_gradient, nnx.state(policy, nnx.Param))
+    nnx.update(policy, frozen_params)
     return policy
 
 
@@ -119,19 +118,27 @@ def create_residual_batch(
     """
     batch_size = obs_chunks.shape[0]
     
-    # select time t from 0 to chunk_size-1
+    first_obs = obs_chunks[:, 0, :]  # [batch_size, obs_dim]
+    
+    # Generate base policy action using first obs (single action, not chunk)
+    rng_split = jax.random.split(rng, batch_size + 1)[1:]  # Split RNG for each  batch item
+    base_actions = jax.vmap(
+        lambda o, rng: base_policy.action(rng, o[None],num_steps=5),
+        in_axes=(0, 0)
+    )(first_obs, rng_split)
+    
+    # select time t from 0 to chunk_size-1 for residual learning
+    # This is the time step at which we will extract observations and actions
+    # We use a random time t for each batch item to allow diverse training
+    # This allows the residual policy to learn corrections at different time steps
     time_t = jax.random.randint(rng, (batch_size,), 0, action_chunk_size)
+    #select base actions at time t
+    base_actions = base_actions.squeeze(axis=1) # [batch_size,action_chunk_size, action_dim]
+    base_actions = base_actions[jnp.arange(batch_size), time_t, :]  # [ 
+    base_actions = jax.lax.stop_gradient(base_actions)
     
     # Extract observations at time t
     batch_obs = obs_chunks[jnp.arange(batch_size), time_t, :]  # [batch_size, obs_dim]
-    
-    # Generate base policy action using obs at time t (single action, not chunk)
-    rng_split = jax.random.split(rng, batch_size + 1)[1:]  # Split RNG for each batch item
-    base_actions = jax.vmap(lambda r, o: base_policy.action(r, o[None], num_steps=5)[0, 0, :])(
-        rng_split, batch_obs
-    )
-    base_actions = jax.lax.stop_gradient(base_actions)
-    
     # Extract target actions at time t
     batch_target_actions = action_chunks[jnp.arange(batch_size), time_t, :]  # [batch_size, action_dim]
     
@@ -200,8 +207,6 @@ def main(config: Config):
         residual_config = _model.ResidualModelConfig(
             channel_dim=256,
             channel_hidden_dim=512,
-            action_chunk_size=action_chunk_size,
-            num_flow_steps=20,
         )
         
         residual_policy = _model.ResidualPolicy(
@@ -244,9 +249,7 @@ def main(config: Config):
                 def loss_fn(residual_policy: _model.ResidualPolicy):
                     # Create observation chunks [batch_size, chunk_size, obs_dim]
                     # Safely get obs[t] to obs[t+chunk_size-1] 
-                    obs_chunks = data.obs[
-                        batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]
-                    ]
+                    obs_chunks = data.obs[batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]]
                     action_chunks = data.action[batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]]
                     
                     # Zero actions after done
@@ -266,7 +269,6 @@ def main(config: Config):
                     batch_obs, batch_base_actions, batch_target_actions = create_residual_batch(
                         key, base_policy, obs_chunks, action_chunks, action_chunk_size
                     )   
-                    
                     # Residual policy learns: residual = target_action - base_action
                     # This allows the policy to focus on corrections rather than full action prediction
                     return residual_policy.loss(batch_obs, batch_base_actions, batch_target_actions)

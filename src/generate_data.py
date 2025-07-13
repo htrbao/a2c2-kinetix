@@ -44,7 +44,7 @@ class Config:
     # Batch size for scan in number of steps *per environment*.
     batch_size: int = 256
     # Number of *total* steps to collect (lower bound -- rounded up to nearest multiple of batch size * num_envs).
-    num_steps: int = 1_000_00
+    num_steps: int = 1_000_000
 
     solve_rate_threshold: float = 0.65
     action_sample_std: float | None = None

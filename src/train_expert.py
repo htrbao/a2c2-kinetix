@@ -36,7 +36,7 @@ class Config:
         #"worlds/l/chain_lander.json",
         #"worlds/l/catcher_v3.json",
         #"worlds/l/trampoline.json",
-        #s"worlds/l/car_launch.json",
+        #"worlds/l/car_launch.json",
     )
     seed: int = 32
     num_seeds: int = 8
