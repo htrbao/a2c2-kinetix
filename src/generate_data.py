@@ -40,7 +40,7 @@ class Config:
     )
     seed: int = 0
     # Number of environments to run in parallel.
-    num_envs: int = 8
+    num_envs: int = 128
     # Batch size for scan in number of steps *per environment*.
     batch_size: int = 256
     # Number of *total* steps to collect (lower bound -- rounded up to nearest multiple of batch size * num_envs).

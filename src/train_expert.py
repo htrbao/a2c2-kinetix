@@ -41,11 +41,11 @@ class Config:
     seed: int = 32
     num_seeds: int = 8
     log_interval: int = 20
-    num_updates: int = 500
+    num_updates: int = 1000
     num_steps: int = 256
-    num_envs: int = 8
+    num_envs: int = 256
     num_minibatches: int = 8
-    num_epochs: int = 2
+    num_epochs: int = 4
     gamma: float = 0.995
     gae_lambda: float = 0.9
     clip_eps: float = 0.2
