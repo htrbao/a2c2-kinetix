@@ -17,6 +17,15 @@ class ModelConfig:
     action_chunk_size: int = 8
 
 
+@dataclasses.dataclass(frozen=True)
+class ResidualModelConfig:
+    """Configuration for Residual Policy"""
+    channel_dim: int = 256
+    channel_hidden_dim: int = 512
+    action_chunk_size: int = 8
+    num_flow_steps = 5
+
+
 def posemb_sincos(pos: jax.Array, embedding_dim: int, min_period: float, max_period: float) -> jax.Array:
     """Computes sine-cosine positional embedding vectors for scalar positions."""
     if embedding_dim % 2 != 0:
@@ -264,3 +273,71 @@ class FlowPolicy(nnx.Module):
         u_t = action - noise
         pred = self(obs, x_t, time)
         return jnp.mean(jnp.square(pred - u_t))
+
+
+class ResidualPolicy(nnx.Module):
+    """
+    Residual Policy that learns to improve upon a base flow policy.
+    The base flow policy remains frozen while this policy learns residual corrections.
+    """
+    
+    def __init__(
+        self,
+        *,
+        obs_dim: int,
+        action_dim: int,
+        base_policy: FlowPolicy,
+        config: ResidualModelConfig,
+        rngs: nnx.Rngs,
+    ):
+        self.base_policy = base_policy
+        self.action_dim = action_dim
+        self.channel_hidden_dim = config.channel_hidden_dim
+        self.action_chunk_size = config.action_chunk_size
+        self.obs_dim = obs_dim
+        self.num_flow_steps = config.num_flow_steps
+        
+        self.residual_policy = nnx.Sequential(
+            nnx.Linear(obs_dim + action_dim, config.channel_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_dim, config.channel_hidden_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_hidden_dim, action_dim, rngs=rngs),
+        )
+        
+    def predict_action(self, obs: jax.Array) -> jax.Array:
+        """
+        Direct action prediction using base policy.
+        """
+        # ベースポリシーでaction chunkを生成
+        rng = jax.random.PRNGKey(0)  # 固定シードまたは外部から渡す
+        base_action = jax.lax.stop_gradient(self.base_policy.action(rng, obs, num_steps=self.num_flow_steps))
+        return base_action
+
+    def __call__(self, obs: jax.Array, base_action: jax.Array) -> jax.Array:
+        """
+        Predicts the residual correction to the base policy's action.
+        # obs: Observations (batch_size, obs_dim)
+        # action: Actions (batch_size, action_dim)
+        """
+        return self.apply_residual(obs, base_action)
+
+    def apply_residual(self, obs: jax.Array, base_action : jax.Array) -> jax.Array:
+        """
+        Applies the residual correction to the base policy's action.
+        """
+        residual_action = self.residual_policy(jnp.concatenate([obs, base_action], axis=-1))
+        return base_action + residual_action
+
+    def loss(self, obs: jax.Array, base_action:jax.Array, action: jax.Array):
+        """
+        Computes the loss for the residual policy.
+        # rng: Random number generator key
+        # obs: Observations (batch_size, obs_dim)
+        # action: Actions (batch_size, action_dim)
+        """
+        residual = self(obs,base_action)
+        # Calculate the loss as the mean squared error between the predicted residual and the actual action
+        diff = action - base_action
+        loss = jnp.mean(jnp.square(residual - diff))
+        return loss
