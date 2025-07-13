@@ -34,17 +34,17 @@ class Config:
     base_policy_path: str  # 事前学習されたFlowPolicyのパス（残差学習のベースとなる）
     level_paths: Sequence[str] = (
         "worlds/l/grasp_easy.json",
-        "worlds/l/catapult.json",
-        "worlds/l/cartpole_thrust.json",
-        "worlds/l/hard_lunar_lander.json",
-        "worlds/l/mjc_half_cheetah.json",
-        "worlds/l/mjc_swimmer.json",
-        "worlds/l/mjc_walker.json",
-        "worlds/l/h17_unicycle.json",
-        "worlds/l/chain_lander.json",
-        "worlds/l/catcher_v3.json",
-        "worlds/l/trampoline.json",
-        "worlds/l/car_launch.json",
+        #"worlds/l/catapult.json",
+        #"worlds/l/cartpole_thrust.json",
+        #"worlds/l/hard_lunar_lander.json",
+        #"worlds/l/mjc_half_cheetah.json",
+        #"worlds/l/mjc_swimmer.json",
+        #"worlds/l/mjc_walker.json",
+        #"worlds/l/h17_unicycle.json",
+        #"worlds/l/chain_lander.json",
+        #"worlds/l/catcher_v3.json",
+        #"worlds/l/trampoline.json",
+        #"worlds/l/car_launch.json",
     )
     batch_size: int = 512
     num_epochs: int = 16
@@ -82,12 +82,12 @@ def load_base_policy(policy_path: str, obs_dim: int, action_dim: int, config: _m
     
     # Load state
     policy_state = nnx.state(policy)
-    policy_state.update(nnx.State.from_pure_dict(state_dict))
+    policy_state.update(state_dict)
     nnx.update(policy, policy_state)
     
     # Freeze base policy
     for param in jax.tree.leaves(nnx.state(policy, nnx.Param)):
-        param.value = jax.lax.stop_gradient(param.value)
+        param = jax.lax.stop_gradient(param)
     
     return policy
 
@@ -190,10 +190,11 @@ def main(config: Config):
         return load_base_policy(str(policy_path), obs_dim, action_dim, config.eval.model)
 
     base_policies = [load_base_policy_for_level(i) for i in range(len(config.level_paths))]
+    base_policy = jax.tree.map(lambda *x: x[0], *base_policies)  # Use the first policy as base for vmap
 
     @functools.partial(jax.jit, in_shardings=sharding, out_shardings=sharding)
     @jax.vmap
-    def init(rng: jax.Array, base_policy: _model.FlowPolicy) -> ResidualEpochCarry:
+    def init(rng: jax.Array) -> ResidualEpochCarry:
         rng, key = jax.random.split(rng)
         
         residual_config = _model.ResidualModelConfig(
@@ -206,7 +207,6 @@ def main(config: Config):
         residual_policy = _model.ResidualPolicy(
             obs_dim=obs_dim,
             action_dim=action_dim,
-            base_policy=base_policy,
             config=residual_config,
             rngs=nnx.Rngs(key),
         )
@@ -228,87 +228,82 @@ def main(config: Config):
         graphdef, train_state = nnx.split((residual_policy, optimizer))
         return ResidualEpochCarry(rng, train_state, graphdef)
 
-    @functools.partial(jax.jit, donate_argnums=(0,), in_shardings=sharding, out_shardings=sharding)
-    @jax.vmap
-    def train_epoch(
-        epoch_carry: ResidualEpochCarry, 
-        level: kenv_state.EnvState, 
-        data: generate_data.Data,
+
+    def make_train_epoch(
         base_policy: _model.FlowPolicy,
     ):
-        def train_minibatch(carry: tuple[jax.Array, nnx.State], batch_idxs: jax.Array):
-            rng, train_state = carry
-            residual_policy, optimizer = nnx.merge(epoch_carry.graphdef, train_state)
+        @functools.partial(jax.jit, donate_argnums=(0,), in_shardings=sharding, out_shardings=sharding)
+        @jax.vmap
+        def train_epoch(epoch_carry: ResidualEpochCarry, level: kenv_state.EnvState, data: generate_data.Data):
+            def train_minibatch(carry: tuple[jax.Array, nnx.State], batch_idxs: jax.Array):
+                rng, train_state = carry
+                residual_policy, optimizer = nnx.merge(epoch_carry.graphdef, train_state)
 
-            rng, key = jax.random.split(rng)
+                rng, key = jax.random.split(rng)
 
-            def loss_fn(residual_policy: _model.ResidualPolicy):
-                # Create observation chunks [batch_size, chunk_size, obs_dim]
-                # Safely get obs[t] to obs[t+chunk_size-1] 
-                obs_chunks = data.obs[
-                    batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]
-                ]  # [batch_size, action_chunk_size, obs_dim]
-                
-                action_chunks = data.action[batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]]
-                
-                # Zero actions after done
-                done_chunks = data.done[batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]]
-                done_idxs = jnp.where(
-                    jnp.any(done_chunks, axis=-1),
-                    jnp.argmax(done_chunks, axis=-1),
-                    action_chunk_size,
-                )
-                action_chunks = jnp.where(
-                    jnp.arange(action_chunk_size)[None, :, None] >= done_idxs[:, None, None],
-                    0.0,
-                    action_chunks,
-                )
-                
-                # Create residual training batch with observation chunks
-                batch_obs, batch_base_actions, batch_target_actions = create_residual_batch(
-                    key, base_policy, obs_chunks, action_chunks, action_chunk_size
-                )
-                
-                # Residual policy learns: residual = target_action - base_action
-                # This allows the policy to focus on corrections rather than full action prediction
-                return residual_policy.loss(batch_obs, batch_base_actions, batch_target_actions)
-
-            loss, grads = nnx.value_and_grad(loss_fn)(residual_policy)
-            info = {"loss": loss, "grad_norm": optax.global_norm(grads)}
-            optimizer.update(grads)
-            _, train_state = nnx.split((residual_policy, optimizer))
-            return (rng, train_state), info
-
-        # Shuffle and batch (ensure we have space for observation sequences)
-        rng, key = jax.random.split(epoch_carry.rng)
-        # Reserve space for observation chunks (we need at least action_chunk_size observations)
-        max_start_idx = data.obs.shape[0] - action_chunk_size
-        permutation = jax.random.permutation(key, max_start_idx)
-        permutation = permutation.reshape(-1, config.batch_size)
-        
-        # Train
-        (rng, train_state), train_info = jax.lax.scan(
-            train_minibatch, (epoch_carry.rng, epoch_carry.train_state), permutation
-        )
-        train_info = jax.tree.map(lambda x: x.mean(), train_info)
-        
-        # TODO: Evaluation for residual policy
-        eval_info = {}
-        
-        video = None
-        return ResidualEpochCarry(rng, train_state, epoch_carry.graphdef), ({**train_info, **eval_info}, video)
-
+                def loss_fn(residual_policy: _model.ResidualPolicy):
+                    # Create observation chunks [batch_size, chunk_size, obs_dim]
+                    # Safely get obs[t] to obs[t+chunk_size-1] 
+                    obs_chunks = data.obs[
+                        batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]
+                    ]
+                    action_chunks = data.action[batch_idxs[:, None] + jnp.arange(action_chunk_size)[None, :]]
+                    
+                    # Zero actions after done
+                    done_chunks = data.done[batch_idxs[:, None] + jnp.arange(action_chunk_size
+                    )[None, :]]
+                    done_idxs = jnp.where(
+                        jnp.any(done_chunks, axis=-1),
+                        jnp.argmax(done_chunks, axis=-1),
+                        action_chunk_size,
+                    )
+                    action_chunks = jnp.where(
+                        jnp.arange(action_chunk_size)[None, :, None] >= done_idxs[:, None, None],
+                        0.0,
+                        action_chunks,
+                    )   
+                    # Create residual training batch with observation chunks
+                    batch_obs, batch_base_actions, batch_target_actions = create_residual_batch(
+                        key, base_policy, obs_chunks, action_chunks, action_chunk_size
+                    )   
+                    
+                    # Residual policy learns: residual = target_action - base_action
+                    # This allows the policy to focus on corrections rather than full action prediction
+                    return residual_policy.loss(batch_obs, batch_base_actions, batch_target_actions)
+                loss, grads = nnx.value_and_grad(loss_fn)(residual_policy)
+                info = {"loss": loss, "grad_norm": optax.global_norm(grads)}
+                optimizer.update(grads)
+                _, train_state = nnx.split((residual_policy, optimizer))
+                return (rng, train_state), info
+            # Shuffle and batch (ensure we have space for observation sequences)
+            rng, key = jax.random.split(epoch_carry.rng)
+            # Reserve space for observation chunks (we need at least action_chunk_size observations)
+            max_start_idx = data.obs.shape[0] - action_chunk_size
+            num_batches = (max_start_idx // config.batch_size) 
+            permutation = jax.random.permutation(key, max_start_idx)
+            permutation= permutation[: num_batches * config.batch_size]
+            permutation = permutation.reshape(-1, config.batch_size)
+            # Train
+            (rng, train_state), train_info = jax.lax.scan(
+                train_minibatch, (epoch_carry.rng, epoch_carry.train_state), permutation
+            )
+            train_info = jax.tree.map(lambda x: x.mean(), train_info)
+            
+            eval_info = {}
+            video = None
+            return ResidualEpochCarry(rng, train_state, epoch_carry.graphdef), ({**train_info, **eval_info}, video)
+        return train_epoch
+            
     wandb.init(project=WANDB_PROJECT)
     rng = jax.random.key(config.seed)
     
     # Initialize residual policies  
     epoch_carry = init(
         jax.random.split(rng, len(config.level_paths)), 
-        base_policies  # Pass directly without jax.tree.map conversion
     )
-    
+    train_epoch = make_train_epoch(base_policy)
     for epoch_idx in tqdm.tqdm(range(config.num_epochs)):
-        epoch_carry, (info, video) = train_epoch(epoch_carry, levels, data, base_policies)
+        epoch_carry, (info, video) = train_epoch(epoch_carry, levels, data)
 
         for i in range(len(config.level_paths)):
             level_name = config.level_paths[i].replace("/", "_").replace(".json", "")

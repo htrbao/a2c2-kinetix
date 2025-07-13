@@ -26,25 +26,25 @@ class Config:
     run_path: str
     level_paths: Sequence[str] = (
         "worlds/l/grasp_easy.json",
-        "worlds/l/catapult.json",
-        "worlds/l/cartpole_thrust.json",
-        "worlds/l/hard_lunar_lander.json",
-        "worlds/l/mjc_half_cheetah.json",
-        "worlds/l/mjc_swimmer.json",
-        "worlds/l/mjc_walker.json",
-        "worlds/l/h17_unicycle.json",
-        "worlds/l/chain_lander.json",
-        "worlds/l/catcher_v3.json",
-        "worlds/l/trampoline.json",
-        "worlds/l/car_launch.json",
+        #"worlds/l/catapult.json",
+        #"worlds/l/cartpole_thrust.json",
+        #"worlds/l/hard_lunar_lander.json",
+        #"worlds/l/mjc_half_cheetah.json",
+        #"worlds/l/mjc_swimmer.json",
+        #"worlds/l/mjc_walker.json",
+        #"worlds/l/h17_unicycle.json",
+        #"worlds/l/chain_lander.json",
+        #"worlds/l/catcher_v3.json",
+        #"worlds/l/trampoline.json",
+        #"worlds/l/car_launch.json",
     )
     seed: int = 0
     # Number of environments to run in parallel.
-    num_envs: int = 128
+    num_envs: int = 8
     # Batch size for scan in number of steps *per environment*.
     batch_size: int = 256
     # Number of *total* steps to collect (lower bound -- rounded up to nearest multiple of batch size * num_envs).
-    num_steps: int = 1_000_000
+    num_steps: int = 1_000_00
 
     solve_rate_threshold: float = 0.65
     action_sample_std: float | None = None

@@ -296,11 +296,9 @@ class ResidualPolicy(nnx.Module):
         *,
         obs_dim: int,
         action_dim: int,
-        base_policy: FlowPolicy,
         config: ResidualModelConfig,
         rngs: nnx.Rngs,
     ):
-        self.base_policy = base_policy
         self.action_dim = action_dim
         self.channel_hidden_dim = config.channel_hidden_dim
         self.action_chunk_size = config.action_chunk_size
@@ -314,15 +312,6 @@ class ResidualPolicy(nnx.Module):
             nnx.relu,
             nnx.Linear(config.channel_hidden_dim, action_dim, rngs=rngs),
         )
-        
-    def predict_action(self, obs: jax.Array) -> jax.Array:
-        """
-        Direct action prediction using base policy.
-        """
-        # ベースポリシーでaction chunkを生成
-        rng = jax.random.PRNGKey(0)  # 固定シードまたは外部から渡す
-        base_action = jax.lax.stop_gradient(self.base_policy.action(rng, obs, num_steps=self.num_flow_steps))
-        return base_action
 
     def __call__(self, obs: jax.Array, base_action: jax.Array) -> jax.Array:
         """

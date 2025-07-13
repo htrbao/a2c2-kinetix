@@ -26,26 +26,26 @@ import wandb
 class Config:
     level_paths: Sequence[str] = (
         "worlds/l/grasp_easy.json",
-        "worlds/l/catapult.json",
-        "worlds/l/cartpole_thrust.json",
-        "worlds/l/hard_lunar_lander.json",
-        "worlds/l/mjc_half_cheetah.json",
-        "worlds/l/mjc_swimmer.json",
-        "worlds/l/mjc_walker.json",
-        "worlds/l/h17_unicycle.json",
-        "worlds/l/chain_lander.json",
-        "worlds/l/catcher_v3.json",
-        "worlds/l/trampoline.json",
-        "worlds/l/car_launch.json",
+        #"worlds/l/catapult.json",
+        #"worlds/l/cartpole_thrust.json",
+        #"worlds/l/hard_lunar_lander.json",
+        #"worlds/l/mjc_half_cheetah.json",
+        #"worlds/l/mjc_swimmer.json",
+        #"worlds/l/mjc_walker.json",
+        #"worlds/l/h17_unicycle.json",
+        #"worlds/l/chain_lander.json",
+        #"worlds/l/catcher_v3.json",
+        #"worlds/l/trampoline.json",
+        #s"worlds/l/car_launch.json",
     )
     seed: int = 32
     num_seeds: int = 8
     log_interval: int = 20
-    num_updates: int = 1000
+    num_updates: int = 500
     num_steps: int = 256
-    num_envs: int = 256
+    num_envs: int = 8
     num_minibatches: int = 8
-    num_epochs: int = 4
+    num_epochs: int = 2
     gamma: float = 0.995
     gae_lambda: float = 0.9
     clip_eps: float = 0.2
