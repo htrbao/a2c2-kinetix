@@ -17,6 +17,13 @@ class ModelConfig:
     action_chunk_size: int = 8
 
 
+@dataclasses.dataclass(frozen=True)
+class ResidualModelConfig:
+    """Configuration for Residual Policy"""
+    channel_dim: int = 256
+    channel_hidden_dim: int = 512
+
+
 def posemb_sincos(pos: jax.Array, embedding_dim: int, min_period: float, max_period: float) -> jax.Array:
     """Computes sine-cosine positional embedding vectors for scalar positions."""
     if embedding_dim % 2 != 0:
@@ -264,3 +271,80 @@ class FlowPolicy(nnx.Module):
         u_t = action - noise
         pred = self(obs, x_t, time)
         return jnp.mean(jnp.square(pred - u_t))
+
+
+class ResidualPolicy(nnx.Module):
+    """
+    Residual Policy that learns to improve upon a base flow policy.
+    
+    The key idea of residual learning:
+    - Base policy: produces base_action from observation
+    - Residual policy: learns residual = target_action - base_action
+    - Final action: base_action + residual
+    
+    This approach allows the residual policy to focus on learning only the 
+    corrections needed to improve the base policy, rather than learning 
+    the entire action mapping from scratch.
+    
+    The base flow policy remains frozen while this policy learns residual corrections.
+    """
+    
+    def __init__(
+        self,
+        *,
+        obs_dim: int,
+        action_dim: int,
+        config: ResidualModelConfig,
+        rngs: nnx.Rngs,
+    ):
+        self.action_dim = action_dim
+        self.channel_hidden_dim = config.channel_hidden_dim
+        self.obs_dim = obs_dim
+        
+        self.residual_policy = nnx.Sequential(
+            nnx.Linear(obs_dim + action_dim, config.channel_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_dim, config.channel_hidden_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_hidden_dim, config.channel_hidden_dim, rngs=rngs),
+            nnx.relu,
+            nnx.Linear(config.channel_hidden_dim, action_dim, rngs=rngs),
+        )
+
+    def __call__(self, obs: jax.Array, base_action: jax.Array) -> jax.Array:
+        """
+        Predicts the final action by applying residual correction to the base action.
+        Args:
+            obs: Observations (batch_size, obs_dim)
+            base_action: Base policy actions (batch_size, action_dim)
+        Returns:
+            Final action = base_action + residual_correction
+        """
+        return self.apply_residual(obs, base_action)
+
+    def apply_residual(self, obs: jax.Array, base_action : jax.Array) -> jax.Array:
+        """
+        Applies the residual correction to the base policy's action.
+        The residual policy learns: residual = target_action - base_action
+        Final action = base_action + residual
+        """
+        residual_correction = self.residual_policy(jnp.concatenate([obs, base_action], axis=-1))
+        return base_action + residual_correction
+
+    def loss(self, obs: jax.Array, base_action: jax.Array, target_action: jax.Array):
+        """
+        Computes the loss for the residual policy.
+        Args:
+            obs: Observations (batch_size, obs_dim)
+            base_action: Base policy actions (batch_size, action_dim)
+            target_action: Target actions (batch_size, action_dim)
+        """
+        # Calculate the target residual (what we want to learn)
+        target_residual = target_action - base_action
+        
+        # Predict the residual using the residual policy
+        predicted_residual = self.residual_policy(jnp.concatenate([obs, base_action], axis=-1))
+        
+        # Calculate the loss as the mean squared error between predicted and target residuals
+        loss = jnp.mean(jnp.square(predicted_residual - target_residual))
+        return loss
