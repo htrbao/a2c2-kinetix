@@ -32,4 +32,4 @@ The levels are defined in `worlds/l/`.
 4. Train residual policies: `uv run src/train_residual.py --config.run-path logs-expert/avid-forest-14/ --config.base-policy-path ./logs-bc/snowy-lion-5/31/policies/`
 5. Evaluate imitation learning policies ( naive and realtime): `uv run src/eval_flow_base.py --run-path ./logs-bc/<wandb-run-name> --output-dir <output-dir>`
 
-6. Evaluate residual policies: `uv run src/eval_residual.py --config.run-path ./logs-residual/<wandb-run-name> --config.base-policy-path ./logs-bc/<wandb-run-name>/<epoch-number>/policies/ --output-dir <output-dir>`
+6. Evaluate residual policies: `uv run src/eval_residual.py --run-path ./logs-residual/<wandb-run-name> --config.base-policy-path ./logs-bc/<wandb-run-name>/<epoch-number>/policies/ --output-dir <output-dir>`
