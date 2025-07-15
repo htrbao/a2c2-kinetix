@@ -274,7 +274,7 @@ def main(
     sharding = jax.sharding.NamedSharding(mesh, pspec)
 
     @functools.partial(jax.jit, static_argnums=(0,), in_shardings=sharding, out_shardings=sharding)
-    @functools.partial(shard_map.shard_map, mesh=mesh, in_specs=(None, pspec, pspec), out_specs=pspec)
+    @functools.partial(shard_map.shard_map, mesh=mesh, in_specs=(None, pspec, pspec), out_specs=pspec,check_rep=False)
     @functools.partial(jax.vmap, in_axes=(None, 0, 0,))
     def _eval(config: ResidualEvalConfig, rng: jax.Array, level: kenv_state.EnvState):
         eval_info, _ = eval(config, env, rng, level, base_policy,residual_policy, env_params, static_env_params)
