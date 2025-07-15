@@ -113,6 +113,8 @@ def eval(
             time_feature_cos = jnp.cos(actual_time * (2 * jnp.pi / base_policy.action_chunk_size))
             time_feature_sin = jnp.sin(actual_time * (2 * jnp.pi / base_policy.action_chunk_size))
             time_feature = jnp.array([time_feature_cos, time_feature_sin])
+            batch_size = obs.shape[0]
+            time_feature = jnp.tile(time_feature, (batch_size, 1))  # [batch_size, 2]
             final_action = residual_policy.apply_residual(obs=obs,base_action=action,time_feature=time_feature)
             next_obs, next_env_state, reward, done, info = env.step(key, env_state, final_action, env_params)
             time += 1
