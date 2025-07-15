@@ -302,16 +302,14 @@ class ResidualPolicy(nnx.Module):
         self.obs_dim = obs_dim
         
         self.residual_policy = nnx.Sequential(
-            nnx.Linear(obs_dim + action_dim, config.channel_dim, rngs=rngs),
+            nnx.Linear(obs_dim + action_dim + 1, config.channel_dim, rngs=rngs),
             nnx.relu,
             nnx.Linear(config.channel_dim, config.channel_hidden_dim, rngs=rngs),
-            nnx.relu,
-            nnx.Linear(config.channel_hidden_dim, config.channel_hidden_dim, rngs=rngs),
             nnx.relu,
             nnx.Linear(config.channel_hidden_dim, action_dim, rngs=rngs),
         )
 
-    def __call__(self, obs: jax.Array, base_action: jax.Array) -> jax.Array:
+    def __call__(self, obs: jax.Array, base_action: jax.Array, time_feature : jax.Array) -> jax.Array:
         """
         Predicts the final action by applying residual correction to the base action.
         Args:
@@ -320,18 +318,18 @@ class ResidualPolicy(nnx.Module):
         Returns:
             Final action = base_action + residual_correction
         """
-        return self.apply_residual(obs, base_action)
+        return self.apply_residual(obs, base_action, time_feature)
 
-    def apply_residual(self, obs: jax.Array, base_action : jax.Array) -> jax.Array:
+    def apply_residual(self, obs: jax.Array, base_action : jax.Array,time_feature : jax.Array) -> jax.Array:
         """
         Applies the residual correction to the base policy's action.
         The residual policy learns: residual = target_action - base_action
         Final action = base_action + residual
         """
-        residual_correction = self.residual_policy(jnp.concatenate([obs, base_action], axis=-1))
+        residual_correction = self.residual_policy(jnp.concatenate([obs, base_action ,time_feature], axis=-1))
         return base_action + residual_correction
 
-    def loss(self, obs: jax.Array, base_action: jax.Array, target_action: jax.Array):
+    def loss(self, obs: jax.Array, base_action: jax.Array, time_feature:jax.Array, target_action: jax.Array):
         """
         Computes the loss for the residual policy.
         Args:
@@ -343,7 +341,7 @@ class ResidualPolicy(nnx.Module):
         target_residual = target_action - base_action
         
         # Predict the residual using the residual policy
-        predicted_residual = self.residual_policy(jnp.concatenate([obs, base_action], axis=-1))
+        predicted_residual = self.residual_policy(jnp.concatenate([obs, base_action, time_feature], axis=-1))
         
         # Calculate the loss as the mean squared error between predicted and target residuals
         loss = jnp.mean(jnp.square(predicted_residual - target_residual))

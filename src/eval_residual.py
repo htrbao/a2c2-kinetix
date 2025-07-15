@@ -32,7 +32,6 @@ class ResidualEvalConfig:
     execute_horizon: int = 1
     # Residual policy specific
     base_policy_path: str | None = None  # Path to base policy if different from training
-    
     model: _model.ModelConfig = _model.ModelConfig()
     residual_model: _model.ResidualModelConfig = _model.ResidualModelConfig()
 
@@ -104,11 +103,17 @@ def eval(
 
     def execute_chunk(carry, _):
         def step_with_residual_policy(carry, action):
-            rng, obs, env_state = carry
+            rng, obs, env_state,time  = carry
+            if time < config.inference_delay:
+                actual_time = time + config.execute_horizon
+            else:
+                actual_time = time
             rng, key = jax.random.split(rng)
-            final_action = residual_policy.apply_residual(obs=obs,base_action=action)
+            time_feature = jnp.cos(actual_time * (2 * jnp.pi / base_policy.action_chunk_size))
+            final_action = residual_policy.apply_residual(obs=obs,base_action=action,time_feature=time_feature)
             next_obs, next_env_state, reward, done, info = env.step(key, env_state, final_action, env_params)
-            return (rng, next_obs, next_env_state), (done, env_state, info)
+            time += 1
+            return (rng, next_obs, next_env_state,time), (done, env_state, info)
 
         rng, obs, env_state, action_chunk, n = carry
         rng, key = jax.random.split(rng)
@@ -133,8 +138,9 @@ def eval(
             axis=1,
         )
         next_n = jnp.concatenate([n[config.execute_horizon :], jnp.zeros(config.execute_horizon, dtype=jnp.int32)])
+        time = 0
         (rng, next_obs, next_env_state), (dones, env_states, infos) = jax.lax.scan(
-            step_with_residual_policy, (rng, obs, env_state), action_chunk_to_execute.transpose(1, 0, 2)
+            step_with_residual_policy, (rng, obs, env_state,time), action_chunk_to_execute.transpose(1, 0, 2)
         )
         # if config.inference_delay > 0:
         #     infos["match"] = jnp.mean(jnp.abs(fixed_prefix - action_chunk_to_execute))

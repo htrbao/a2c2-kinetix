@@ -97,7 +97,7 @@ def create_residual_batch(
     obs_chunks: jax.Array,
     action_chunks: jax.Array,
     action_chunk_size: int,
-) -> tuple[jax.Array, jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Create training batch for residual policy learning.
     
@@ -142,7 +142,11 @@ def create_residual_batch(
     # Extract target actions at time t
     batch_target_actions = action_chunks[jnp.arange(batch_size), time_t, :]  # [batch_size, action_dim]
     
-    return batch_obs, base_actions, batch_target_actions
+    # Change time t to cos(t) for residual learning
+    time_features = jnp.cos(time_t * (2 * jnp.pi / action_chunk_size))  # [batch_size]
+    time_features = jnp.expand_dims(time_features, axis=-1)  # [batch
+    
+    return batch_obs, base_actions, time_features, batch_target_actions
 
 
 def main(config: Config):
@@ -266,12 +270,12 @@ def main(config: Config):
                         action_chunks,
                     )   
                     # Create residual training batch with observation chunks
-                    batch_obs, batch_base_actions, batch_target_actions = create_residual_batch(
+                    batch_obs, batch_base_actions, batch_time_features, batch_target_actions = create_residual_batch(
                         key, base_policy, obs_chunks, action_chunks, action_chunk_size
                     )   
                     # Residual policy learns: residual = target_action - base_action
                     # This allows the policy to focus on corrections rather than full action prediction
-                    return residual_policy.loss(batch_obs, batch_base_actions, batch_target_actions)
+                    return residual_policy.loss(batch_obs, batch_base_actions, batch_time_features, batch_target_actions)
                 loss, grads = nnx.value_and_grad(loss_fn)(residual_policy)
                 info = {"loss": loss, "grad_norm": optax.global_norm(grads)}
                 optimizer.update(grads)
