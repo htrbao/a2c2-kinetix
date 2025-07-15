@@ -284,11 +284,9 @@ def main(config: Config):
                 return (rng, train_state), info
             # Shuffle and batch (ensure we have space for observation sequences)
             rng, key = jax.random.split(epoch_carry.rng)
-            # Reserve space for observation chunks (we need at least action_chunk_size observations)
-            max_start_idx = data.obs.shape[0] - action_chunk_size
-            num_batches = (max_start_idx // config.batch_size) 
-            permutation = jax.random.permutation(key, max_start_idx)
-            permutation= permutation[: num_batches * config.batch_size]
+            permutation = jax.random.permutation(key, data.obs.shape[0] - action_chunk_size + 1)
+            
+            # Batch
             permutation = permutation.reshape(-1, config.batch_size)
             # Train
             (rng, train_state), train_info = jax.lax.scan(
