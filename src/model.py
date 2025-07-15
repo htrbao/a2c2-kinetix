@@ -302,7 +302,7 @@ class ResidualPolicy(nnx.Module):
         self.obs_dim = obs_dim
         
         self.residual_policy = nnx.Sequential(
-            nnx.Linear(obs_dim + action_dim + 1, config.channel_dim, rngs=rngs),
+            nnx.Linear(obs_dim + action_dim + 2, config.channel_dim, rngs=rngs),
             nnx.relu,
             nnx.Linear(config.channel_dim, config.channel_hidden_dim, rngs=rngs),
             nnx.relu,

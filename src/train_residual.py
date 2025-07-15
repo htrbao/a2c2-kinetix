@@ -143,8 +143,9 @@ def create_residual_batch(
     batch_target_actions = action_chunks[jnp.arange(batch_size), time_t, :]  # [batch_size, action_dim]
     
     # Change time t to cos(t) for residual learning
-    time_features = jnp.cos(time_t * (2 * jnp.pi / action_chunk_size))  # [batch_size]
-    time_features = jnp.expand_dims(time_features, axis=-1)  # [batch
+    time_features_cos = jnp.cos(time_t * (2 * jnp.pi / action_chunk_size))  # [batch_size]
+    time_features_sin = jnp.sin(time_t * (2 * jnp.pi / action_chunk_size))  # [batch_size]
+    time_features = jnp.stack([time_features_cos, time_features_sin], axis=-1)  # [batch_size, 2]
     
     return batch_obs, base_actions, time_features, batch_target_actions
 
