@@ -83,9 +83,6 @@ def eval(
                 config.inference_delay <= policy.action_chunk_size
                 and prefix_attention_horizon <= policy.action_chunk_size
             ), f"{config.inference_delay=} {prefix_attention_horizon=} {policy.action_chunk_size=}"
-            print(
-                f"{config.execute_horizon=} {config.inference_delay=} {prefix_attention_horizon=} {policy.action_chunk_size=}"
-            )
             next_action_chunk = policy.realtime_action(
                 key,
                 obs,
