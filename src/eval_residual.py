@@ -144,7 +144,7 @@ def eval(
         )
         next_n = jnp.concatenate([n[config.execute_horizon :], jnp.zeros(config.execute_horizon, dtype=jnp.int32)])
         time = 0
-        (rng, next_obs, next_env_state), (dones, env_states, infos) = jax.lax.scan(
+        (rng, next_obs, next_env_state, time), (dones, env_states, infos) = jax.lax.scan(
             step_with_residual_policy, (rng, obs, env_state,time), action_chunk_to_execute.transpose(1, 0, 2)
         )
         # if config.inference_delay > 0:
