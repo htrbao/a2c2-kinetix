@@ -104,10 +104,11 @@ def eval(
     def execute_chunk(carry, _):
         def step_with_residual_policy(carry, action):
             rng, obs, env_state,time  = carry
-            if time < config.inference_delay:
-                actual_time = time + config.execute_horizon
-            else:
-                actual_time = time
+            actual_time = jax.lax.cond(
+                time < config.inference_delay,
+                lambda: time + config.execute_horizon,
+                lambda: time
+            )
             rng, key = jax.random.split(rng)
             time_feature_cos = jnp.cos(actual_time * (2 * jnp.pi / base_policy.action_chunk_size))
             time_feature_sin = jnp.sin(actual_time * (2 * jnp.pi / base_policy.action_chunk_size))
