@@ -293,7 +293,7 @@ def main(
                 for k, v in out.items():
                     results[k].append(v[i])
                 results["delay"].append(inference_delay)
-                results["method"].append("naive")
+                results["method"].append("naive+residual")
                 results["level"].append(level_paths[i])
                 results["execute_horizon"].append(execute_horizon)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
