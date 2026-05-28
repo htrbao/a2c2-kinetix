@@ -22,6 +22,18 @@ import train_expert
 
 
 @dataclasses.dataclass(frozen=True)
+class NaiveA2C2MethodConfig:
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class RepaintingMethodV2Config:
+    inversion_method: _model.InversionMethod = "euler"
+    optim_iters: int = 5 # only used when inversion_method="optim"
+    optim_lr: float = 0.01
+
+
+@dataclasses.dataclass(frozen=True)
 class ResidualEvalConfig:
     """Configuration for evaluating residual policies."""
     step: int = -1  # Which epoch to evaluate (-1 for latest)
@@ -32,8 +44,27 @@ class ResidualEvalConfig:
     execute_horizon: int = 1
     # Residual policy specific
     base_policy_path: str | None = None  # Path to base policy if different from training
+    method: NaiveA2C2MethodConfig | RepaintingMethodV2Config = NaiveA2C2MethodConfig()
     model: _model.ModelConfig = _model.ModelConfig()
     residual_model: _model.ResidualModelConfig = _model.ResidualModelConfig()
+
+
+@dataclasses.dataclass(frozen=True)
+class RepaintingMethodV2Config:
+    step: int = -1  # Which epoch to evaluate (-1 for latest)
+    num_evals: int = 2048  # Number of evaluation episodes
+    num_flow_steps: int = 5
+
+    inference_delay: int = 0
+    execute_horizon: int = 1
+    # Residual policy specific
+    base_policy_path: str | None = None  # Path to base policy if different from training
+    model: _model.ModelConfig = _model.ModelConfig()
+    residual_model: _model.ResidualModelConfig = _model.ResidualModelConfig()
+
+    inversion_method: _model.InversionMethod = "euler"
+    optim_iters: int = 5 # only used when inversion_method="optim"
+    optim_lr: float = 0.01
 
 
 def load_base_policy(policy_path: str, obs_dim: int, action_dim: int, config: _model.ModelConfig) -> _model.FlowPolicy:
@@ -122,7 +153,25 @@ def eval(
 
         rng, obs, env_state, action_chunk, n = carry
         rng, key = jax.random.split(rng)
-        next_action_chunk = base_policy.action(key, obs, config.num_flow_steps)
+        if isinstance(config.method, NaiveA2C2MethodConfig):
+            next_action_chunk = base_policy.action(key, obs, config.num_flow_steps)
+        elif isinstance(config.method, RepaintingMethodV2Config):
+            prefix_attention_horizon = base_policy.action_chunk_size - config.execute_horizon
+            assert (
+                config.inference_delay <= base_policy.action_chunk_size
+                and prefix_attention_horizon <= base_policy.action_chunk_size
+            ), f"{config.inference_delay=} {prefix_attention_horizon=} {base_policy.action_chunk_size=}"
+            print(
+                f"[RepaintingV2-{config.method.inversion_method}] {config.execute_horizon=} {config.inference_delay=} {prefix_attention_horizon=} {base_policy.action_chunk_size=}"
+            )
+            next_action_chunk = base_policy.repainting_action_v2(
+                key,
+                obs,
+                config.num_flow_steps,
+                action_chunk,
+                config.inference_delay,
+                config.method.inversion_method
+            )
 
         # we execute `inference_delay` actions from the *previously generated* action chunk, and then the remaining
         # `execute_horizon - inference_delay` actions from the newly generated action chunk
@@ -133,6 +182,10 @@ def eval(
             ],
             axis=1,
         )
+        if config.inference_delay > 0:
+            prefix_match = jnp.mean(jnp.abs(next_action_chunk[:, : config.inference_delay] - action_chunk[:, : config.inference_delay]))
+        else:
+            prefix_match = jnp.array(0.0)
         # throw away the first `execute_horizon` actions from the newly generated action chunk, to align it with the
         # correct frame of reference for the next scan iteration
         next_action_chunk = jnp.concatenate(
@@ -149,6 +202,7 @@ def eval(
         )
         # if config.inference_delay > 0:
         #     infos["match"] = jnp.mean(jnp.abs(fixed_prefix - action_chunk_to_execute))
+        infos["match"] = prefix_match
         return (rng, next_obs, next_env_state, next_action_chunk, next_n), (dones, env_states, infos)
 
     rng, key = jax.random.split(rng)
@@ -294,6 +348,21 @@ def main(
                     results[k].append(v[i])
                 results["delay"].append(inference_delay)
                 results["method"].append("naive+residual")
+                results["level"].append(level_paths[i])
+                results["execute_horizon"].append(execute_horizon)
+
+            c = dataclasses.replace(
+                config, inference_delay=inference_delay, execute_horizon=execute_horizon,
+                method=RepaintingMethodV2Config(
+                    inversion_method="euler"
+                )
+            )
+            out = jax.device_get(_eval(c, rngs, levels))
+            for i in range(len(level_paths)):
+                for k, v in out.items():
+                    results[k].append(v[i])
+                results["delay"].append(inference_delay)
+                results["method"].append(f"naive+residual+paint")
                 results["level"].append(level_paths[i])
                 results["execute_horizon"].append(execute_horizon)
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
